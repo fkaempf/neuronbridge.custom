@@ -4,7 +4,7 @@ import gspread
 import requests
 import os
 from google.oauth2.service_account import Credentials
-
+from tqdm import tqdm
 from google.oauth2.service_account import Credentials
 scope = ["https://www.googleapis.com/auth/spreadsheets", 
          "https://www.googleapis.com/auth/drive"]
@@ -24,14 +24,18 @@ df = pd.DataFrame(sheet)
 pre = 'https://s3.amazonaws.com/janelia-flylight-color-depth'
 
 os.makedirs('target', exist_ok=True)
-for i,item in df.iterrows():
+for i,item in tqdm(df.iterrows(),total=df.shape[0]):
     url = f'{pre}/{item['Alignment Space']}/{item['Library'].replace(' ','_')}/searchable_neurons/pngs/{item['Line Name']}-{item['Slide Code']}-Split_GAL4-{item['Sex']}-{item['Magnification']}-{item['Anatomical Area'].lower()}-{item['Alignment Space']}-CDM_1-01.png'
-    response = requests.get(url)
-    if response.status_code == 200:
-        with open(f'target/{url.split('/')[-1]}', 'wb') as f:
-            f.write(response.content)
-   
-    else:
-        url = f'{pre}/{item['Alignment Space']}/{item['Library'].replace(' ','_')}/searchable_neurons/pngs/{item['Line Name']}-{item['Slide Code']}-GAL4-{item['Sex']}-{item['Magnification']}-{item['Anatomical Area'].lower()}-{item['Alignment Space']}-CDM_1-01.png'
+    
+    if not f'{url.split('/')[-1]}' in os.listdir('target'):
         response = requests.get(url)
+        if response.status_code == 200:
+            with open(f'target/{url.split('/')[-1]}', 'wb') as f:
+                f.write(response.content)
+    
+        else:
+            url = f'{pre}/{item['Alignment Space']}/{item['Library'].replace(' ','_')}/searchable_neurons/pngs/{item['Line Name']}-{item['Slide Code']}-GAL4-{item['Sex']}-{item['Magnification']}-{item['Anatomical Area'].lower()}-{item['Alignment Space']}-CDM_1-01.png'
+            response = requests.get(url)
 
+    else:
+        print(f'{url.split("/")[-1]} already exists, skipping download.')
