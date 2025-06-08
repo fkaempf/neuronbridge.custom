@@ -1,0 +1,52 @@
+---
+title: "neuronbridger.attempt"
+output: html_document
+---
+imports
+```{r}
+library(malecns)
+library(coconatfly)
+library(fafbseg)
+library(neuprintr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(plotly)
+library(stringr)
+library(igraph)
+library(tidygraph)
+library(ggraph)
+library(jsonlite)
+library(ggplot2)
+library(reshape2)
+library(Matrix)
+library(neuronbridger)
+```
+
+get vAB3 MANC ID
+
+```{r}
+mba<-mcns_body_annotations()
+vAB.MANC.id <- mba %>%
+  filter(grepl('vAB3',synonyms))%>%
+  pull(manc_bodyid)%>%
+  as.character()
+
+PPN1.MANC.id <- mba %>%
+  filter(grepl('PPN1',synonyms))%>%
+  pull(manc_bodyid)%>%
+  as.character()
+
+```
+
+start neuro bridge
+
+```{r}
+all.nb.ids = neuronbridge_ids()
+
+```
+
+
+
+
+
