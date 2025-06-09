@@ -27,23 +27,40 @@ get vAB3 MANC ID
 
 ```{r}
 mba<-mcns_body_annotations()
-vAB.MANC.id <- mba %>%
+vAB3.MANC.id <- mba %>%
   filter(grepl('vAB3',synonyms))%>%
   pull(manc_bodyid)%>%
-  as.character()
+  as.character()%>%
+  unique()
 
 PPN1.MANC.id <- mba %>%
   filter(grepl('PPN1',synonyms))%>%
   pull(manc_bodyid)%>%
-  as.character()
+  as.character()%>%
+  unique()
 
 ```
+  11055
+
 
 start neuro bridge
 
 ```{r}
-all.nb.ids = neuronbridge_ids()
 
+version <- "v3_4_0"
+dataset <- 'by_body'
+item <- PPN1.MANC.id[1]
+path = sprintf("https://janelia-neuronbridge-data-prod.s3.amazonaws.com/%s/metadata/%s/%s.json?x-id=GetObject", 
+      version, dataset, item)
+target.metdatata <- fromJSON(path)[[1]]%>%filter(libraryName=='FlyEM_MANC_v1.0'
+)
+
+path2 = sprintf("https://janelia-neuronbridge-data-prod.s3.amazonaws.com/%s/metadata/cdsresults/%s.json", 
+      version, target.metdatata%>%pull(id))
+cds.results <-  fromJSON(path2)$results
+scan_mip
+neuronbridge_hits
+neuronbridge_avoid
 ```
 
 

@@ -6,8 +6,7 @@ import os
 from google.oauth2.service_account import Credentials
 from tqdm import tqdm
 from google.oauth2.service_account import Credentials
-scope = ["https://www.googleapis.com/auth/spreadsheets", 
-         "https://www.googleapis.com/auth/drive"]
+scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 cred_path = '/Users/fkampf/My Drive/phd/Jefferis Lab/google.cloud/general-461415-aeee4ddcc160.json'
 
 creds = Credentials.from_service_account_file(cred_path, scopes=scope)
