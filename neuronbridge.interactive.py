@@ -4,7 +4,7 @@ neuronbridge.interactive.py
 Comprehensive workflow for fetching, analyzing, and visualizing neuron matching data from the Janelia NeuronBridge project.
 Compares two neuron cell types (vAB3 and PPN1) using their matching scores and matching pixels, highlights outliers,
 and generates both static (matplotlib) and interactive (Plotly) scatterplots. Interactive plots allow
-clicking on points to open associated MIP images or download Visually Lossless Stacks (VLS).
+clicking on points to open associated CDM images or download Visually Lossless Stacks (VLS).
 
 -------------------------------------------------------------------------------
 Workflow Overview:
@@ -13,7 +13,7 @@ Workflow Overview:
 3. Build a DataFrame with normalized scores and matching pixels for each cell type.
 4. Calculate ratios and quantile thresholds to highlight interesting lines.
 5. Create static scatterplots with matplotlib, labeling outliers.
-6. Create interactive Plotly scatterplots (scores and matching pixels) with clickable points linking to MIP images or VLS stacks.
+6. Create interactive Plotly scatterplots (scores and matching pixels) with clickable points linking to CDM images or VLS stacks.
 
 -------------------------------------------------------------------------------
 Dependencies:
@@ -25,9 +25,11 @@ Usage:
 Outputs:
 - Static scatterplots (matplotlib)
 - Interactive HTML scatterplots:
-    - clickable_mip_plot.html
+    - clickable_brain_plot.html
+    - clickable_vnc_plot.html
+    - clickable_brain_plot_matchingpixels.html
+    - clickable_vnc_plot_matchingpixels.html
     - clickable_vls_plot.html
-    - clickable_mip_plot_matchingpixels.html
     - clickable_vls_plot_matchingpixels.html
 
 -------------------------------------------------------------------------------
@@ -37,7 +39,7 @@ Data sources:
 
 -------------------------------------------------------------------------------
 Author: Florian Kämpf
-Date: 2025-03-11
+Date: 2025-06-11
 -------------------------------------------------------------------------------
 """
 
@@ -48,6 +50,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- PARAMETERS ---
 # IDs for vAB3 and PPN1 neurons in the FlyEM_MANC_v1.0 library
@@ -74,7 +77,7 @@ for id, neuron_type in zip(
 link_df = link_df.loc[link_df['libraryName'] == 'FlyEM_MANC_v1.0', ['id', 'cell_type']]
 
 # --- FETCH CDS RESULTS FOR EACH NEURON ---
-# For each neuron, fetch color depth search (CDS) results and build links to MIP and VLS images
+# For each neuron, fetch color depth search (CDS) results and build links to CDM and VLS images
 link_df2 = pd.DataFrame()
 for _, item in tqdm(link_df.iterrows(), total=link_df.shape[0], desc="Fetching CDS results"):
     path = f"https://janelia-neuronbridge-data-prod.s3.amazonaws.com/{version}/metadata/cdsresults/{item['id']}.json"
@@ -82,13 +85,99 @@ for _, item in tqdm(link_df.iterrows(), total=link_df.shape[0], desc="Fetching C
     temp = pd.json_normalize(response.json()['results'])
     temp['query_id'] = item['id']
     temp['cell_type'] = item['cell_type']
-    temp['link2mip'] = 'https://s3.amazonaws.com/janelia-flylight-color-depth/' + temp['image.files.CDM']
+    temp['link2cdm'] = 'https://s3.amazonaws.com/janelia-flylight-color-depth/' + temp['image.files.CDM']
     temp['link2vls'] = 'https://s3.amazonaws.com/janelia-flylight-imagery/' + temp['image.files.VisuallyLosslessStack']
     link_df2 = pd.concat([link_df2, temp], ignore_index=True)
 
-# --- BUILD DATAFRAME OF UNIQUE PUBLISHED NAMES AND THEIR MIP/VLS LINKS ---
+# --- BUILD DATAFRAME OF UNIQUE PUBLISHED NAMES AND THEIR CDM/VLS LINKS ---
 # Used for merging with main analysis DataFrame for interactive plots
-linkdf = link_df2.loc[:, ['image.publishedName', 'link2mip','link2vls', 'image.id']].drop_duplicates(subset='image.publishedName', keep='first')
+linkdf = link_df2.loc[:, ['image.publishedName', 'link2cdm','link2vls', 'image.id']].drop_duplicates(subset='image.publishedName', keep='first')
+
+# --- FETCH GAL4 AND CDM LINKS FOR BRAIN/VNC, MALE/FEMALE IN PARALLEL ---
+def fetch_gal4_links(published_name):
+    """
+    Fetches additional Gal4 and CDM links for a given published_name from NeuronBridge S3.
+    Returns a tuple of links for male/female, brain/VNC, Gal4/CDM.
+    """
+    import time
+
+    def safe_extract(df, gender, area, colname, prefix):
+        try:
+            values = (
+                df.loc[
+                    (df.get('gender') == gender) & (df.get('anatomicalArea') == area),
+                    colname
+                ]
+                .dropna()
+                .unique()
+                .tolist()
+            )
+            return f'{prefix}{values[0]}' if values else None
+        except Exception:
+            return None
+
+    url = f'https://janelia-neuronbridge-data-prod.s3.amazonaws.com/v3_4_1/metadata/by_line/{published_name}.json'
+    for attempt in range(3):
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            break
+        except requests.exceptions.ConnectionError as e:
+            if 'Connection reset by peer' in str(e) and attempt < 2:
+                time.sleep(1)
+                continue
+            else:
+                return (published_name,) + (None,) * 8
+        except Exception:
+            return (published_name,) + (None,) * 8
+
+    try:
+        temp = pd.json_normalize(response.json().get('results', []))
+    except Exception:
+        return (published_name,) + (None,) * 8
+
+    # Define fields and URLs
+    fields = [
+        ('m', 'Brain', 'files.Gal4Expression', 'https://s3.amazonaws.com/janelia-flylight-imagery/'),
+        ('m', 'VNC', 'files.Gal4Expression', 'https://s3.amazonaws.com/janelia-flylight-imagery/'),
+        ('f', 'Brain', 'files.Gal4Expression', 'https://s3.amazonaws.com/janelia-flylight-imagery/'),
+        ('f', 'VNC', 'files.Gal4Expression', 'https://s3.amazonaws.com/janelia-flylight-imagery/'),
+        ('m', 'Brain', 'files.CDM', 'https://s3.amazonaws.com/janelia-flylight-color-depth/'),
+        ('m', 'VNC', 'files.CDM', 'https://s3.amazonaws.com/janelia-flylight-color-depth/'),
+        ('f', 'Brain', 'files.CDM', 'https://s3.amazonaws.com/janelia-flylight-color-depth/'),
+        ('f', 'VNC', 'files.CDM', 'https://s3.amazonaws.com/janelia-flylight-color-depth/'),
+    ]
+
+    links = [safe_extract(temp, gender, area, col, prefix) for gender, area, col, prefix in fields]
+
+    return (published_name, *links)
+
+# Parallel fetching with threads for all published names
+results = []
+with ThreadPoolExecutor(max_workers=50) as executor:
+    futures = {executor.submit(fetch_gal4_links, name): name for name in linkdf['image.publishedName']}
+    for future in tqdm(as_completed(futures), total=len(futures), desc="Fetching Gal4 links"):
+        results.append(future.result())
+
+# Update DataFrame with results efficiently
+for name, link2gal4_m_brain, link2gal4_m_vnc, link2gal4_f_brain, link2gal4_f_vnc, link2cdm_m_brain, link2cdm_m_vnc, link2cdm_f_brain, link2cdm_f_vnc in results:
+    linkdf.loc[linkdf['image.publishedName'] == name, 'link2gal4_m_brain'] = link2gal4_m_brain
+    linkdf.loc[linkdf['image.publishedName'] == name, 'link2gal4_m_vnc'] = link2gal4_m_vnc
+    linkdf.loc[linkdf['image.publishedName'] == name, 'link2gal4_f_brain'] = link2gal4_f_brain
+    linkdf.loc[linkdf['image.publishedName'] == name, 'link2gal4_f_vnc'] = link2gal4_f_vnc
+    linkdf.loc[linkdf['image.publishedName'] == name, 'link2cdm_m_brain'] = link2cdm_m_brain
+    linkdf.loc[linkdf['image.publishedName'] == name, 'link2cdm_m_vnc'] = link2cdm_m_vnc
+    linkdf.loc[linkdf['image.publishedName'] == name, 'link2cdm_f_brain'] = link2cdm_f_brain
+    linkdf.loc[linkdf['image.publishedName'] == name, 'link2cdm_f_vnc'] = link2cdm_f_vnc
+
+# --- COALESCE GAL4 AND CDM LINKS FOR BRAIN/VNC ---
+# Use the first available link for each area (brain/vnc), prioritizing male Gal4, then male CDM, then female Gal4, then female CDM
+linkdf['combined_brain'] = linkdf['link2gal4_m_brain'].combine_first(linkdf['link2cdm_m_brain']).combine_first(linkdf['link2gal4_f_brain']).combine_first(linkdf['link2cdm_f_brain'])
+linkdf['combined_vnc'] = linkdf['link2gal4_m_vnc'].combine_first(linkdf['link2cdm_m_vnc']).combine_first(linkdf['link2gal4_f_vnc']).combine_first(linkdf['link2cdm_f_vnc'])
+linkdf = linkdf.drop(columns=[
+    'link2gal4_m_brain', 'link2gal4_m_vnc', 'link2gal4_f_brain', 'link2gal4_f_vnc',
+    'link2cdm_m_brain', 'link2cdm_m_vnc', 'link2cdm_f_brain', 'link2cdm_f_vnc'
+])
 
 # --- GROUP BY CELL TYPE AND PUBLISHED NAME, AGGREGATE BY MEAN ---
 # For each cell type and published name, compute mean normalizedScore and matchingPixels
@@ -190,7 +279,10 @@ plt.show()
 
 # --- HELPER FUNCTION TO FLATTEN MULTIINDEX COLUMNS ---
 def clean_col(col):
-    """Flatten MultiIndex columns for easier access."""
+    """
+    Flatten MultiIndex columns for easier access.
+    Converts tuples to underscore-joined strings.
+    """
     if isinstance(col, tuple):
         return '_'.join([str(c) for c in col if c])
     return col
@@ -201,10 +293,21 @@ def make_interactive_plot(
 ):
     """
     Create an interactive Plotly scatterplot with clickable points.
-    - Points open the associated MIP or VLS link in a new tab.
+    - Points open the associated CDM, VLS, or Gal4/CDM link in a new tab.
     - Outliers are colored/labeled.
     - Isometric axes for direct comparison.
     - Output is saved as an HTML file.
+    Args:
+        df: DataFrame to plot
+        x, y: column names for axes
+        label_col: column for coloring/labeling outliers
+        link_col: column with URLs for clickable points
+        hover_col: column to show in hover tooltip
+        plot_title: plot title
+        x_label, y_label: axis labels
+        ratio_label: label for ratio (for legend)
+        color_label: label for color legend
+        file_name: output HTML file name
     """
     fig = px.scatter(
         df,
@@ -253,7 +356,15 @@ def prepare_plot_df(df_wide, label_mask, label_col, linkdf, link_field):
     Prepare DataFrame for plotting:
     - Flattens columns
     - Adds label column for outliers
-    - Merges with link DataFrame for MIP/VLS URLs
+    - Merges with link DataFrame for CDM/VLS/Gal4/CDM URLs
+    Args:
+        df_wide: main wide-format DataFrame
+        label_mask: boolean mask for outlier labeling
+        label_col: column name for label
+        linkdf: DataFrame with publishedName and links
+        link_field: which link field to use for clickable points
+    Returns:
+        DataFrame ready for plotting
     """
     df_plot = df_wide.copy()
     df_plot[label_col] = np.where(label_mask, 1, 0)
@@ -269,26 +380,76 @@ def prepare_plot_df(df_wide, label_mask, label_col, linkdf, link_field):
     ).sort_values(by=[df_plot.columns[1], df_plot.columns[2]], ascending=False).reset_index(drop=True)
     return df_plot
 
-# --- INTERACTIVE PLOTS (MIP and VLS, scores and matching pixels) ---
+# --- INTERACTIVE PLOTS (CDM/CDM/Gal4 and VLS, scores and matching pixels) ---
 
-# 1. Interactive plot: normalized scores, MIP links
-df_plot = prepare_plot_df(df_wide, label_mask, 'Label', linkdf, 'link2mip')
+# 1. Interactive plot: normalized scores, brain (Gal4/CDM) links
+df_plot = prepare_plot_df(df_wide, label_mask, 'Label', linkdf, 'combined_brain')
 make_interactive_plot(
     df_plot,
     x='normalizedScore_vAB3',
     y='normalizedScore_PPN1',
     label_col='Label',
-    link_col='link2mip',
-    hover_col='link2mip',
-    plot_title='vAB3 vs PPN1 Scores with Ratio-Based Highlighting (Click: View MIP)',
+    link_col='combined_brain',
+    hover_col='combined_brain',
+    plot_title='vAB3 vs PPN1 Scores with Ratio-Based Highlighting (Click: View CDM/Brain)',
     x_label='vAB3 normalizedScore',
     y_label='PPN1 normalizedScore',
     ratio_label='normalizedScore Ratio',
     color_label='Label',
-    file_name='clickable_mip_plot.html'
+    file_name='clickable_brain_plot.html'
 )
 
-# 2. Interactive plot: normalized scores, VLS links
+# 2. Interactive plot: normalized scores, VNC (Gal4/CDM) links
+make_interactive_plot(
+    df_plot,
+    x='normalizedScore_vAB3',
+    y='normalizedScore_PPN1',
+    label_col='Label',
+    link_col='combined_vnc',
+    hover_col='combined_vnc',
+    plot_title='vAB3 vs PPN1 Scores with Ratio-Based Highlighting (Click: View CDM/VNC)',
+    x_label='vAB3 normalizedScore',
+    y_label='PPN1 normalizedScore',
+    ratio_label='normalizedScore Ratio',
+    color_label='Label',
+    file_name='clickable_vnc_plot.html'
+)
+
+# 3. Interactive plot: matching pixels, brain (Gal4/CDM) links
+df_plot_mp = prepare_plot_df(df_wide, mp_label_mask, 'Label MP', linkdf, 'combined_brain')
+make_interactive_plot(
+    df_plot_mp,
+    x='matchingPixels_vAB3',
+    y='matchingPixels_PPN1',
+    label_col='Label MP',
+    link_col='combined_brain',
+    hover_col='combined_brain',
+    plot_title='vAB3 vs PPN1 Matching Pixels with Ratio-Based Highlighting (Click: View CDM/Brain)',
+    x_label='vAB3 matchingPixels',
+    y_label='PPN1 matchingPixels',
+    ratio_label='matchingPixels Ratio',
+    color_label='Label MP',
+    file_name='clickable_brain_plot_matchingpixels.html'
+)
+
+# 4. Interactive plot: matching pixels, VNC (Gal4/CDM) links
+df_plot_mp = prepare_plot_df(df_wide, mp_label_mask, 'Label MP', linkdf, 'combined_vnc')
+make_interactive_plot(
+    df_plot_mp,
+    x='matchingPixels_vAB3',
+    y='matchingPixels_PPN1',
+    label_col='Label MP',
+    link_col='combined_vnc',
+    hover_col='combined_vnc',
+    plot_title='vAB3 vs PPN1 Matching Pixels with Ratio-Based Highlighting (Click: View CDM/VNC)',
+    x_label='vAB3 matchingPixels',
+    y_label='PPN1 matchingPixels',
+    ratio_label='matchingPixels Ratio',
+    color_label='Label MP',
+    file_name='clickable_vnc_plot_matchingpixels.html'
+)
+
+# 5. Interactive plot: normalized scores, VLS links
 df_plot_vls = prepare_plot_df(df_wide, label_mask, 'Label', linkdf, 'link2vls')
 make_interactive_plot(
     df_plot_vls,
@@ -305,24 +466,7 @@ make_interactive_plot(
     file_name='clickable_vls_plot.html'
 )
 
-# 3. Interactive plot: matching pixels, MIP links
-df_plot_mp = prepare_plot_df(df_wide, mp_label_mask, 'Label MP', linkdf, 'link2mip')
-make_interactive_plot(
-    df_plot_mp,
-    x='matchingPixels_vAB3',
-    y='matchingPixels_PPN1',
-    label_col='Label MP',
-    link_col='link2mip',
-    hover_col='link2mip',
-    plot_title='vAB3 vs PPN1 Matching Pixels with Ratio-Based Highlighting (Click: View MIP)',
-    x_label='vAB3 matchingPixels',
-    y_label='PPN1 matchingPixels',
-    ratio_label='matchingPixels Ratio',
-    color_label='Label MP',
-    file_name='clickable_mip_plot_matchingpixels.html'
-)
-
-# 4. Interactive plot: matching pixels, VLS links
+# 6. Interactive plot: matching pixels, VLS links
 df_plot_mp_vls = prepare_plot_df(df_wide, mp_label_mask, 'Label MP', linkdf, 'link2vls')
 make_interactive_plot(
     df_plot_mp_vls,
