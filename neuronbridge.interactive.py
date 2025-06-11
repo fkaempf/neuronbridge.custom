@@ -36,8 +36,8 @@ Data sources:
 - vAB3 and PPN1 cell types, FlyEM_MANC_v1.0 library
 
 -------------------------------------------------------------------------------
-Author: [Your Name]
-Date: [Today's Date]
+Author: Florian Kämpf
+Date: 2025-03-11
 -------------------------------------------------------------------------------
 """
 
