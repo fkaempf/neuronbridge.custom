@@ -237,11 +237,14 @@ min_val = np.nanmin([df_wide[('normalizedScore', 'vAB3')].min(), df_wide[('norma
 max_val = np.nanmax([df_wide[('normalizedScore', 'vAB3')].max(), df_wide[('normalizedScore', 'PPN1')].max()])
 plt.plot([min_val, max_val], [min_val, max_val], linestyle='--', color='gray', label='y = x')
 for _, row in df_wide[df_wide['Label'].notna()].iterrows():
+    # Place label to the right of the dot, with a horizontal offset for clarity
     ax.text(
-        row[('normalizedScore', 'vAB3')]*1.05,
-        row[('normalizedScore', 'PPN1')]*0.99,
-        row['Label'][0],
-        fontsize=6
+        row[('normalizedScore', 'vAB3')] + 0.03 * (max_val - min_val),  # 3% of axis range to the right
+        row[('normalizedScore', 'PPN1')],
+        str(row['image.publishedName'].item()),  # Only the name
+        fontsize=7,
+        ha='left',   # align label left to the offset position
+        va='center'  # center vertically with the dot
     )
 plt.xlabel('vAB3 normalizedScore')
 plt.ylabel('PPN1 normalizedScore')
@@ -263,11 +266,14 @@ min_val = np.nanmin([df_wide[('matchingPixels', 'vAB3')].min(), df_wide[('matchi
 max_val = np.nanmax([df_wide[('matchingPixels', 'vAB3')].max(), df_wide[('matchingPixels', 'PPN1')].max()])
 plt.plot([min_val, max_val], [min_val, max_val], linestyle='--', color='gray', label='y = x')
 for _, row in df_wide[df_wide['Label MP'].notna()].iterrows():
+    # Place label to the right of the dot, with a horizontal offset for clarity
     ax.text(
-        row[('matchingPixels', 'vAB3')]*1.05,
-        row[('matchingPixels', 'PPN1')]*0.99,
-        row['Label MP'][0],
-        fontsize=6
+        row[('matchingPixels', 'vAB3')] + 0.03 * (max_val - min_val),  # 3% of axis range to the right
+        row[('matchingPixels', 'PPN1')],
+        str(row['image.publishedName'].item()),  # Only the name
+        fontsize=7,
+        ha='left',   # align label left to the offset position
+        va='center'  # center vertically with the dot
     )
 plt.xlabel('vAB3 matchingPixels')
 plt.ylabel('PPN1 matchingPixels')
